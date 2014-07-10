@@ -1,0 +1,13 @@
+// $Id$
+// vim:ft=javascript
+
+// If your extension references something external, use ARG_WITH
+// ARG_WITH("pcache", "for pcache support", "no");
+
+// Otherwise, use ARG_ENABLE
+// ARG_ENABLE("pcache", "enable pcache support", "no");
+
+if (PHP_PCACHE != "no") {
+	EXTENSION("pcache", "pcache.c");
+}
+
