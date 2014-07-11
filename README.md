@@ -7,13 +7,25 @@
 /_/                                 
 </pre>
 
-PHP local cache for extension
-=============================
+Extension for PHP local cache 
+-----------------------------
+
+* 1) used slab memory algorithm
 
 
+Example:
+```php
+<?php
 
+pcache_set("myname", "liexusong");
 
+var_dump(pcache_get("myname"));
 
+pcache_del("myname");
+
+var_dump(pcache_get("myname"));
+?>
+```
 
 
 
