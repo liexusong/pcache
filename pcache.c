@@ -364,7 +364,7 @@ PHP_FUNCTION(pcache_set)
 
     while (next) {
         // key exists
-        if (item->ksize == next->key_len &&
+        if (item->ksize == next->ksize &&
             !memcmp(item->data, next->data, item->ksize))
         {
             temp = next;
