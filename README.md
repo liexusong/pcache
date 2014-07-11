@@ -1,16 +1,16 @@
 <pre>
-                           __       
-    ____  _________ ______/ /_  ___ 
-   / __ \/ ___/ __ `/ ___/ __ \/ _ \
-  / /_/ / /__/ /_/ / /__/ / / /  __/
- / .___/\___/\__,_/\___/_/ /_/\___/ 
-/_/                                 
+                                   __       
+            ____  _________ ______/ /_  ___ 
+           / __ \/ ___/ __ `/ ___/ __ \/ _ \
+          / /_/ / /__/ /_/ / /__/ / / /  __/
+         / .___/\___/\__,_/\___/_/ /_/\___/ 
+        /_/                                 
 </pre>
 
 Extension for PHP local cache 
 -----------------------------
 
-* 1) used slab memory algorithm
+* 1) slab memory algorithm
 
 
 Example:
@@ -34,3 +34,7 @@ pcache.buckets_size = 1000       ; set the HashTable buckets size
 pcache.cache_size = 1048576      ; set memory caches size
 pcache.enable = 1                ; enable pcache extension
 ```
+
+todo:
+* 1) compress value feature
+
