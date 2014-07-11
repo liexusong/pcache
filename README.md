@@ -24,9 +24,13 @@ var_dump(pcache_get("myname"));
 pcache_del("myname");
 
 var_dump(pcache_get("myname"));
+
 ?>
 ```
 
-
-
-
+php.ini
+```ini
+pcache.buckets_size = 1000       ; set the HashTable buckets size
+pcache.cache_size = 1048576      ; set memory caches size
+pcache.enable = 1                ; enable pcache extension
+```
