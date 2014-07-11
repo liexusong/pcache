@@ -58,9 +58,6 @@ static ncx_uint_t  ncx_slab_exact_shift;
 static ncx_uint_t  ncx_pagesize;
 static ncx_uint_t  ncx_pagesize_shift;
 
-int  ncx_ncpu;
-
-
 void
 ncx_slab_init(ncx_slab_pool_t *pool)
 {
@@ -70,12 +67,7 @@ ncx_slab_init(ncx_slab_pool_t *pool)
     ncx_uint_t        i, n, pages;
     ncx_slab_page_t  *slots;
 
-    ncx_ncpu = sysconf(_SC_NPROCESSORS_ONLN); /* get cpus */
-    if (ncx_ncpu <= 0) {
-        ncx_ncpu = 1;
-    }
-
-    /*pagesize*/
+    /* pagesize */
     ncx_pagesize = getpagesize();
     for (n = ncx_pagesize, ncx_pagesize_shift = 0; 
             n >>= 1; ncx_pagesize_shift++) { /* void */ }

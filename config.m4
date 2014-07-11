@@ -13,9 +13,9 @@ dnl [  --with-pcache             Include pcache support])
 
 dnl Otherwise use enable:
 
-dnl PHP_ARG_ENABLE(pcache, whether to enable pcache support,
+PHP_ARG_ENABLE(pcache, whether to enable pcache support,
 dnl Make sure that the comment is aligned:
-dnl [  --enable-pcache           Enable pcache support])
+[  --enable-pcache           Enable pcache support])
 
 if test "$PHP_PCACHE" != "no"; then
   dnl Write more examples of tests here...
@@ -59,5 +59,5 @@ if test "$PHP_PCACHE" != "no"; then
   dnl
   dnl PHP_SUBST(PCACHE_SHARED_LIBADD)
 
-  PHP_NEW_EXTENSION(pcache, pcache.c, $ext_shared)
+  PHP_NEW_EXTENSION(pcache, pcache.c ncx_lock.c ncx_shm.c ncx_slab.c, $ext_shared)
 fi

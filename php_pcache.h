@@ -42,7 +42,9 @@ PHP_RINIT_FUNCTION(pcache);
 PHP_RSHUTDOWN_FUNCTION(pcache);
 PHP_MINFO_FUNCTION(pcache);
 
-PHP_FUNCTION(confirm_pcache_compiled);	/* For testing, remove later. */
+PHP_FUNCTION(pcache_set);
+PHP_FUNCTION(pcache_get);
+PHP_FUNCTION(pcache_del);
 
 /* 
   	Declare any global variables you may need between the BEGIN

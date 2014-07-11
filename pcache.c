@@ -2,7 +2,7 @@
   +----------------------------------------------------------------------+
   | PHP Version 5                                                        |
   +----------------------------------------------------------------------+
-  | Copyright (c) 1997-2008 The PHP Group                                |
+  | Copyright (c) 1997-2014 The PHP Group                                |
   +----------------------------------------------------------------------+
   | This source file is subject to version 3.01 of the PHP license,      |
   | that is bundled with this package in the file LICENSE, and is        |
@@ -30,13 +30,11 @@
 #include "ncx_shm.h"
 #include "ncx_lock.h"
 
-/* If you declare any globals in php_pcache.h uncomment this:
-ZEND_DECLARE_MODULE_GLOBALS(pcache)
-*/
 
 #define PCACHE_KEY_MAX       256
 #define PCACHE_VAL_MAX       65535
 #define PCACHE_BUCKETS_SIZE  1000
+
 
 typedef struct pcache_item  pcache_item_t;
 
@@ -50,17 +48,24 @@ struct pcache_item {
 /* True global resources - no need for thread safety here */
 static ncx_shm_t cache_shm;
 static ncx_slab_pool_t *cache_pool;
-static void **cache_buckets;
+static pcache_item_t **cache_buckets;
 static ncx_atomic_t *cache_lock;
-static ncx_uint_t cache_size = 10485760; /* 10MB */
+
+static ncx_uint_t cache_size = 1048576; /* 1MB */
+static ncx_uint_t buckets_size = PCACHE_BUCKETS_SIZE;
+static int cache_enable = 1;
+
+int pcache_ncpu;
 
 /* {{{ pcache_functions[]
  *
  * Every user visible function must have an entry in pcache_functions[].
  */
 const zend_function_entry pcache_functions[] = {
-	PHP_FE(confirm_pcache_compiled,	NULL)		/* For testing, remove later. */
-	{NULL, NULL, NULL}	/* Must be the last line in pcache_functions[] */
+    PHP_FE(pcache_set,    NULL)
+    PHP_FE(pcache_get,    NULL)
+    PHP_FE(pcache_del,    NULL)
+    {NULL, NULL, NULL}    /* Must be the last line in pcache_functions[] */
 };
 /* }}} */
 
@@ -68,19 +73,19 @@ const zend_function_entry pcache_functions[] = {
  */
 zend_module_entry pcache_module_entry = {
 #if ZEND_MODULE_API_NO >= 20010901
-	STANDARD_MODULE_HEADER,
+    STANDARD_MODULE_HEADER,
 #endif
-	"pcache",
-	pcache_functions,
-	PHP_MINIT(pcache),
-	PHP_MSHUTDOWN(pcache),
-	PHP_RINIT(pcache),		/* Replace with NULL if there's nothing to do at request start */
-	PHP_RSHUTDOWN(pcache),	/* Replace with NULL if there's nothing to do at request end */
-	PHP_MINFO(pcache),
+    "pcache",
+    pcache_functions,
+    PHP_MINIT(pcache),
+    PHP_MSHUTDOWN(pcache),
+    PHP_RINIT(pcache),
+    PHP_RSHUTDOWN(pcache),
+    PHP_MINFO(pcache),
 #if ZEND_MODULE_API_NO >= 20010901
-	"0.1", /* Replace with version number for your extension */
+    "0.1", /* Replace with version number for your extension */
 #endif
-	STANDARD_MODULE_PROPERTIES
+    STANDARD_MODULE_PROPERTIES
 };
 /* }}} */
 
@@ -88,63 +93,167 @@ zend_module_entry pcache_module_entry = {
 ZEND_GET_MODULE(pcache)
 #endif
 
-/* {{{ PHP_INI
- */
-/* Remove comments and fill if you need to have entries in php.ini
-PHP_INI_BEGIN()
-    STD_PHP_INI_ENTRY("pcache.global_value",      "42", PHP_INI_ALL, OnUpdateLong, global_value, zend_pcache_globals, pcache_globals)
-    STD_PHP_INI_ENTRY("pcache.global_string", "foobar", PHP_INI_ALL, OnUpdateString, global_string, zend_pcache_globals, pcache_globals)
-PHP_INI_END()
-*/
-/* }}} */
 
-/* {{{ php_pcache_init_globals
- */
-/* Uncomment this function if you have INI entries
-static void php_pcache_init_globals(zend_pcache_globals *pcache_globals)
+void pcache_atoi(const char *str, int *ret, int *len)
 {
-	pcache_globals->global_value = 0;
-	pcache_globals->global_string = NULL;
+    const char *ptr = str;
+    char ch;
+    int absolute = 1;
+    int rlen, result;
+
+    ch = *ptr;
+
+    if (ch == '-') {
+        absolute = -1;
+        ++ptr;
+    } else if (ch == '+') {
+        absolute = 1;
+        ++ptr;
+    }
+
+    for (rlen = 0, result = 0; *ptr != '\0'; ptr++) {
+        ch = *ptr;
+
+        if (ch >= '0' && ch <= '9') {
+            result = result * 10 + (ch - '0');
+            rlen++;
+        } else {
+            break;
+        }
+    }
+
+    if (ret) *ret = absolute * result;
+    if (len) *len = rlen;
 }
-*/
-/* }}} */
+
+
+ZEND_INI_MH(pcache_set_cache_size) 
+{
+    int len;
+
+    if (new_value_length == 0) { 
+        return FAILURE;
+    }
+
+    pcache_atoi(new_value, &cache_size, &len);
+
+    if (len > 0 && len < new_value_length) { /* have unit */
+        switch (new_value[len]) {
+        case 'k':
+        case 'K':
+            cache_size *= 1024;
+            break;
+        case 'm':
+        case 'M':
+            cache_size *= 1024 * 1024;
+            break;
+        case 'g':
+        case 'G':
+            cache_size *= 1024 * 1024 * 1024;
+            break;
+        default:
+            return FAILURE;
+        }
+
+    } else if (len == 0) { /*failed */
+        return FAILURE;
+    }
+
+    return SUCCESS;
+}
+
+
+ZEND_INI_MH(pcache_set_buckets_size)
+{
+    if (new_value_length == 0) {
+        return FAILURE;
+    }
+
+    buckets_size = atoi(new_value);
+    if (buckets_size < PCACHE_BUCKETS_SIZE) {
+        buckets_size = PCACHE_BUCKETS_SIZE;
+    }
+
+    return SUCCESS;
+}
+
+
+ZEND_INI_MH(pcache_set_enable)
+{
+    if (new_value_length == 0) {
+        return FAILURE;
+    }
+
+    if (!strcasecmp(new_value, "on") || !strcmp(new_value, "1")) {
+        cache_enable = 1;
+    } else {
+        cache_enable = 0;
+    }
+
+    return SUCCESS;
+}
+
+
+PHP_INI_BEGIN()
+    PHP_INI_ENTRY("pcache.cache_size", "1048576", PHP_INI_ALL,
+          pcache_set_cache_size)
+    PHP_INI_ENTRY("pcache.buckets_size", "1000", PHP_INI_ALL,
+          pcache_set_buckets_size)
+    PHP_INI_ENTRY("pcache.enable", "1", PHP_INI_ALL, pcache_set_enable)
+PHP_INI_END()
+
 
 /* {{{ PHP_MINIT_FUNCTION
  */
 PHP_MINIT_FUNCTION(pcache)
 {
-	/* If you have INI entries, uncomment these lines 
-	REGISTER_INI_ENTRIES();
-	*/
+    void *space;
 
-	void *space;
+    REGISTER_INI_ENTRIES();
 
-	cache_shm.size = cache_size;
-	
-	if (ncx_shm_alloc(&cache_shm) == -1) {
-	    return FAILURE;
-	}
+    if (!cache_enable) {
+        return SUCCESS;
+    }
+
+    cache_shm.size = cache_size;
+    
+    if (ncx_shm_alloc(&cache_shm) == -1) { // alloc share memory
+        return FAILURE;
+    }
 
     space = (void *) cache_shm.addr;
 
-	cache_pool = (ncx_slab_pool_t *) space;
+    cache_pool = (ncx_slab_pool_t *) space;
 
-	cache_pool->addr = space;
-	cache_pool->min_shift = 3;
-	cache_pool->end = space + cache_size;
+    cache_pool->addr = space;
+    cache_pool->min_shift = 3;
+    cache_pool->end = space + cache_size;
 
-	ncx_slab_init(cache_pool);
+    ncx_slab_init(cache_pool); // init slab
 
-	cache_lock = ncx_slab_alloc_locked(cache_pool, sizeof(ncx_atomic_t));
+    cache_lock = ncx_slab_alloc_locked(cache_pool, sizeof(ncx_atomic_t));
+    if (!cache_lock) {
+        ncx_shm_free(&cache_shm);
+        return FAILURE;
+    }
 
-	ncx_memzero(cache_lock, sizeof(ncx_atomic_t)); /* init zero */
+    ncx_memzero(cache_lock, sizeof(ncx_atomic_t)); /* init zero */
 
-	cache_buckets = ncx_slab_alloc_locked(cache_pool,
-	                   sizeof(void *) * PCACHE_BUCKETS_SIZE);
+    cache_buckets = ncx_slab_alloc_locked(cache_pool,
+                       sizeof(pcache_item_t *) * buckets_size);
+    if (!cache_buckets) {
+        ncx_shm_free(&cache_shm);
+        return FAILURE;
+    }
 
-    ncx_memzero(cache_buckets, sizeof(void *) * PCACHE_BUCKETS_SIZE);
+    ncx_memzero(cache_buckets, sizeof(pcache_item_t *) * buckets_size);
 
-	return SUCCESS;
+    pcache_ncpu = sysconf(_SC_NPROCESSORS_ONLN); /* get cpus */
+    if (pcache_ncpu <= 0) {
+        pcache_ncpu = 1;
+    }
+
+    return SUCCESS;
 }
 /* }}} */
 
@@ -152,13 +261,11 @@ PHP_MINIT_FUNCTION(pcache)
  */
 PHP_MSHUTDOWN_FUNCTION(pcache)
 {
-	/* uncomment this line if you have INI entries
-	UNREGISTER_INI_ENTRIES();
-	*/
+    UNREGISTER_INI_ENTRIES();
 
-	ncx_shm_free(&cache_shm);
+    ncx_shm_free(&cache_shm);
 
-	return SUCCESS;
+    return SUCCESS;
 }
 /* }}} */
 
@@ -167,7 +274,7 @@ PHP_MSHUTDOWN_FUNCTION(pcache)
  */
 PHP_RINIT_FUNCTION(pcache)
 {
-	return SUCCESS;
+    return SUCCESS;
 }
 /* }}} */
 
@@ -176,7 +283,7 @@ PHP_RINIT_FUNCTION(pcache)
  */
 PHP_RSHUTDOWN_FUNCTION(pcache)
 {
-	return SUCCESS;
+    return SUCCESS;
 }
 /* }}} */
 
@@ -184,53 +291,219 @@ PHP_RSHUTDOWN_FUNCTION(pcache)
  */
 PHP_MINFO_FUNCTION(pcache)
 {
-	php_info_print_table_start();
-	php_info_print_table_header(2, "pcache support", "enabled");
-	php_info_print_table_end();
+    php_info_print_table_start();
+    php_info_print_table_header(2, "pcache support", "enabled");
+    php_info_print_table_end();
 
-	/* Remove comments if you have entries in php.ini
-	DISPLAY_INI_ENTRIES();
-	*/
+    DISPLAY_INI_ENTRIES();
 }
 /* }}} */
 
 
-/* Remove the following function when you have succesfully modified config.m4
-   so that your module can be compiled into PHP, it exists only for testing
-   purposes. */
+static long pcache_hash(char *key, int len)
+{
+    long h = 0, g;
+    char *kend = key + len;
 
-/* Every user-visible function in PHP should document itself in the source */
-/* {{{ proto string confirm_pcache_compiled(string arg)
-   Return a string to confirm that the module is compiled in */
+    while (key < kend) {
+        h = (h << 4) + *key++;
+        if ((g = (h & 0xF0000000))) {
+            h = h ^ (g >> 24);
+            h = h ^ g;
+        }
+    }
+
+    return h;
+}
+
+
+/* {{{ proto string pcache_set(string key, string val)
+   Return a boolean */
 PHP_FUNCTION(pcache_set)
 {
-	char *arg = NULL;
-	int arg_len, len;
-	char *strg;
+    char *key = NULL, *val = NULL;
+    int key_len, val_len;
+    pcache_item_t *item, *prev, *next, *temp;
+    int index;
+    int nsize;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &arg, &arg_len) == FAILURE) {
-		return;
-	}
+    if (!cache_enable) {
+        RETURN_FALSE;
+    }
 
-	len = spprintf(&strg, 0, "Congratulations! You have successfully modified ext/%.78s/config.m4. Module %.78s is now compiled into PHP.", "pcache", arg);
-	RETURN_STRINGL(strg, len, 0);
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ss",
+          &key, &key_len, &val, &val_len) == FAILURE)
+    {
+        RETURN_FALSE;
+    }
+
+    nsize = sizeof(pcache_item_t) + key_len + val_len;
+    
+    item = ncx_slab_alloc(cache_pool, nsize);
+    if (!item) {
+        RETURN_FALSE;
+    }
+
+    // init item fields
+
+    item->next = NULL;
+    item->ksize = key_len;
+    item->vsize = val_len;
+
+    memcpy(item->data, key, key_len);
+    memcpy(item->data + key_len, val, val_len);
+
+    index = pcache_hash(key, key_len) % buckets_size; // bucket index
+
+    // insert into hashtable
+
+    ncx_shmtx_lock(cache_lock);
+
+    prev = NULL;
+    next = cache_buckets[index];
+
+    while (next) {
+        // key exists
+        if (item->key_len == next->key_len &&
+            !memcmp(item->data, next->data, item->key_len))
+        {
+            temp = next;
+
+            // skip this
+            if (prev) {
+                prev->next = next->next;
+            } else {
+                cache_buckets[index] = next->next;
+            }
+
+            next = next->next;
+            ncx_slab_free(cache_pool, temp);
+
+            continue;
+        }
+
+        prev = next;
+        next = next->next;
+    }
+
+    if (prev) {
+        prev->next = item;
+    } else {
+        cache_buckets[index] = item;
+    }
+
+    ncx_shmtx_unlock(cache_lock);
+
+    RETURN_TRUE;
 }
+
 
 PHP_FUNCTION(pcache_get)
 {
-    
+    char *key = NULL;
+    int key_len;
+    pcache_item_t *item;
+    int index;
+    int retlen = 0;
+    char *retval = NULL;
+
+    if (!cache_enable) {
+        RETURN_FALSE;
+    }
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s",
+          &key, &key_len) == FAILURE)
+    {
+        RETURN_FALSE;
+    }
+
+    index = pcache_hash(key, key_len) % buckets_size; // bucket index
+
+    ncx_shmtx_lock(cache_lock);
+
+    item = cache_buckets[index];
+
+    while (item) {
+        if (item->key_len == key_len && !memcmp(item->data, key, key_len)) {
+            break;
+        }
+        item = item->next;
+    }
+
+    if (item) { // copy to userspace
+        retlen = item->vsize;
+        retval = emalloc(retlen + 1);
+        if (retval) {
+            memcpy(retval, item->data + item->ksize, retlen);
+            retval[retlen] = '\0';
+        }
+    }
+
+    ncx_shmtx_unlock(cache_lock);
+
+    if (retval) {
+        RETURN_STRINGL(retval, retlen, 0);
+    } else {
+        RETURN_FALSE;
+    }
 }
+
 
 PHP_FUNCTION(pcache_del)
 {
-    
+    char *key = NULL;
+    int key_len;
+    pcache_item_t *prev, *next;
+    int index;
+    int found = 0;
+
+    if (!cache_enable) {
+        RETURN_FALSE;
+    }
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s",
+          &key, &key_len) == FAILURE)
+    {
+        RETURN_FALSE;
+    }
+
+    index = pcache_hash(key, key_len) % buckets_size; // bucket index
+
+    ncx_shmtx_lock(cache_lock);
+
+    prev = NULL;
+    next = cache_buckets[index];
+
+    while (next) {
+        if (key_len == next->key_len && !memcmp(key, next->data, key_len)) {
+
+            if (prev) {
+                prev->next = next->next;
+            } else {
+                cache_buckets[index] = next->next;
+            }
+
+            ncx_slab_free(cache_pool, next);
+
+            found = 1;
+
+            break;
+        }
+
+        prev = next;
+        next = next->next;
+    }
+
+    ncx_shmtx_unlock(cache_lock);
+
+    if (found) {
+        RETURN_TRUE;
+    } else {
+        RETURN_FALSE;
+    }
 }
+
 /* }}} */
-/* The previous line is meant for vim and emacs, so it can correctly fold and 
-   unfold functions in source code. See the corresponding marks just before 
-   function definition, where the functions purpose is also documented. Please 
-   follow this convention for the convenience of others editing your code.
-*/
 
 
 /*
@@ -241,3 +514,4 @@ PHP_FUNCTION(pcache_del)
  * vim600: noet sw=4 ts=4 fdm=marker
  * vim<600: noet sw=4 ts=4
  */
+
