@@ -364,8 +364,8 @@ PHP_FUNCTION(pcache_set)
 
     while (next) {
         // key exists
-        if (item->key_len == next->key_len &&
-            !memcmp(item->data, next->data, item->key_len))
+        if (item->ksize == next->key_len &&
+            !memcmp(item->data, next->data, item->ksize))
         {
             temp = next;
 
@@ -424,7 +424,7 @@ PHP_FUNCTION(pcache_get)
     item = cache_buckets[index];
 
     while (item) {
-        if (item->key_len == key_len && !memcmp(item->data, key, key_len)) {
+        if (item->ksize == key_len && !memcmp(item->data, key, key_len)) {
             break;
         }
         item = item->next;
@@ -475,7 +475,7 @@ PHP_FUNCTION(pcache_del)
     next = cache_buckets[index];
 
     while (next) {
-        if (key_len == next->key_len && !memcmp(key, next->data, key_len)) {
+        if (key_len == next->ksize && !memcmp(key, next->data, key_len)) {
 
             if (prev) {
                 prev->next = next->next;
