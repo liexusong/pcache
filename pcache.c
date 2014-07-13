@@ -382,6 +382,12 @@ PHP_FUNCTION(pcache_set)
         RETURN_FALSE;
     }
 
+    // key length and value length are valid?
+
+    if (key_len > PCACHE_KEY_MAX || val_len > PCACHE_VAL_MAX) {
+        RETURN_FALSE;
+    }
+
     org_len = val_len; // save the original size
 
     // try to compress the value
