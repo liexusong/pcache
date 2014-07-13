@@ -29,19 +29,23 @@
 #include "ncx_slab.h"
 #include "ncx_shm.h"
 #include "ncx_lock.h"
+#include "lzf.h"
 
 
 #define PCACHE_KEY_MAX       256
 #define PCACHE_VAL_MAX       65535
 #define PCACHE_BUCKETS_SIZE  1000
+#define PCACHE_MIN_COMPRESS  16
 
 
 typedef struct pcache_item  pcache_item_t;
 
 struct pcache_item {
     pcache_item_t  *next;
-    u_char          ksize;
-    u_short         vsize;
+    u_char          compress;
+    u_char          key_size;
+    u_short         val_size;
+    u_short         org_size;
     char            data[0];
 };
 
@@ -51,9 +55,12 @@ static ncx_slab_pool_t *cache_pool;
 static pcache_item_t **cache_buckets;
 static ncx_atomic_t *cache_lock;
 
+// configure entries
 static ncx_uint_t cache_size = 1048576; /* 1MB */
 static ncx_uint_t buckets_size = PCACHE_BUCKETS_SIZE;
 static int cache_enable = 1;
+static int compress_enable = 1;
+static int compress_min = PCACHE_MIN_COMPRESS;
 
 int pcache_ncpu;
 
@@ -83,7 +90,7 @@ zend_module_entry pcache_module_entry = {
     PHP_RSHUTDOWN(pcache),
     PHP_MINFO(pcache),
 #if ZEND_MODULE_API_NO >= 20010901
-    "0.1", /* Replace with version number for your extension */
+    "0.2", /* Replace with version number for your extension */
 #endif
     STANDARD_MODULE_PROPERTIES
 };
@@ -124,6 +131,22 @@ void pcache_atoi(const char *str, int *ret, int *len)
 
     if (ret) *ret = absolute * result;
     if (len) *len = rlen;
+}
+
+
+ZEND_INI_MH(pcache_set_enable)
+{
+    if (new_value_length == 0) {
+        return FAILURE;
+    }
+
+    if (!strcasecmp(new_value, "on") || !strcmp(new_value, "1")) {
+        cache_enable = 1;
+    } else {
+        cache_enable = 0;
+    }
+
+    return SUCCESS;
 }
 
 
@@ -178,16 +201,31 @@ ZEND_INI_MH(pcache_set_buckets_size)
 }
 
 
-ZEND_INI_MH(pcache_set_enable)
+ZEND_INI_MH(pcache_set_compress_enable)
 {
     if (new_value_length == 0) {
         return FAILURE;
     }
 
     if (!strcasecmp(new_value, "on") || !strcmp(new_value, "1")) {
-        cache_enable = 1;
+        compress_enable = 1;
     } else {
-        cache_enable = 0;
+        compress_enable = 0;
+    }
+
+    return SUCCESS;
+}
+
+
+ZEND_INI_MH(pcache_set_compress_min)
+{
+    if (new_value_length == 0) {
+        return FAILURE;
+    }
+
+    compress_min = atoi(new_value);
+    if (compress_min < PCACHE_MIN_COMPRESS) {
+        compress_min = PCACHE_MIN_COMPRESS;
     }
 
     return SUCCESS;
@@ -199,7 +237,12 @@ PHP_INI_BEGIN()
           pcache_set_cache_size)
     PHP_INI_ENTRY("pcache.buckets_size", "1000", PHP_INI_ALL,
           pcache_set_buckets_size)
-    PHP_INI_ENTRY("pcache.enable", "1", PHP_INI_ALL, pcache_set_enable)
+    PHP_INI_ENTRY("pcache.enable", "1", PHP_INI_ALL,
+          pcache_set_enable)
+    PHP_INI_ENTRY("pcache.compress_enable", "1", PHP_INI_ALL,
+          pcache_set_compress_enable)
+    PHP_INI_ENTRY("pcache.compress_min", "16", PHP_INI_ALL,
+          pcache_set_compress_min)
 PHP_INI_END()
 
 
@@ -322,10 +365,12 @@ static long pcache_hash(char *key, int len)
 PHP_FUNCTION(pcache_set)
 {
     char *key = NULL, *val = NULL;
-    int key_len, val_len;
+    int key_len, val_len, org_len;
     pcache_item_t *item, *prev, *next, *temp;
     int index;
     int nsize;
+    void *out = NULL;
+    int complen = 0, compress = 0;
 
     if (!cache_enable) {
         RETURN_FALSE;
@@ -335,6 +380,23 @@ PHP_FUNCTION(pcache_set)
           &key, &key_len, &val, &val_len) == FAILURE)
     {
         RETURN_FALSE;
+    }
+
+    org_len = val_len; // save the original size
+
+    // try to compress the value
+
+    if (compress_enable && val_len >= compress_min) {
+
+        out = emalloc(val_len + 1);
+        if (out) {
+            complen = lzf_compress(val, val_len, out, val_len);
+            if (complen != 0 && complen < val_len) { // compress success
+                val = out;
+                val_len = complen;
+                compress = 1;
+            }
+        }
     }
 
     nsize = sizeof(pcache_item_t) + key_len + val_len;
@@ -347,8 +409,10 @@ PHP_FUNCTION(pcache_set)
     // init item fields
 
     item->next = NULL;
-    item->ksize = key_len;
-    item->vsize = val_len;
+    item->compress = compress;
+    item->key_size = key_len;
+    item->val_size = val_len;
+    item->org_size = org_len;
 
     memcpy(item->data, key, key_len);
     memcpy(item->data + key_len, val, val_len);
@@ -364,8 +428,8 @@ PHP_FUNCTION(pcache_set)
 
     while (next) {
         // key exists
-        if (item->ksize == next->ksize &&
-            !memcmp(item->data, next->data, item->ksize))
+        if (item->key_size == next->key_size &&
+            !memcmp(item->data, next->data, item->key_size))
         {
             temp = next;
 
@@ -393,6 +457,10 @@ PHP_FUNCTION(pcache_set)
     }
 
     ncx_shmtx_unlock(cache_lock);
+
+    if (NULL != out) {
+        efree(out);
+    }
 
     RETURN_TRUE;
 }
@@ -424,17 +492,26 @@ PHP_FUNCTION(pcache_get)
     item = cache_buckets[index];
 
     while (item) {
-        if (item->ksize == key_len && !memcmp(item->data, key, key_len)) {
+        if (item->key_size == key_len && !memcmp(item->data, key, key_len)) {
             break;
         }
         item = item->next;
     }
 
-    if (item) { // copy to userspace
-        retlen = item->vsize;
+    if (item) { // copy the value to userspace
+
+        retlen = item->org_size;
         retval = emalloc(retlen + 1);
+
         if (retval) {
-            memcpy(retval, item->data + item->ksize, retlen);
+            if (item->compress) {
+                lzf_decompress(item->data + item->key_size,
+                    item->val_size, retval, retlen);
+            } else {
+                memcpy(retval, item->data + item->key_size,
+                    retlen);
+            }
+
             retval[retlen] = '\0';
         }
     }
@@ -475,7 +552,7 @@ PHP_FUNCTION(pcache_del)
     next = cache_buckets[index];
 
     while (next) {
-        if (key_len == next->ksize && !memcmp(key, next->data, key_len)) {
+        if (key_len == next->key_size && !memcmp(key, next->data, key_len)) {
 
             if (prev) {
                 prev->next = next->next;
