@@ -11,6 +11,7 @@ Extension for PHP local cache
 -----------------------------
 
 * 1) slab memory algorithm
+* 2) compress value feature
 
 
 Example:
@@ -33,8 +34,7 @@ php.ini
 pcache.buckets_size = 1000       ; set the HashTable buckets size
 pcache.cache_size = 1048576      ; set memory caches size
 pcache.enable = 1                ; enable pcache extension
+pcache.compress_enable = 1       ; enable compress the value feature
+pcache.compress_min = 16         ; set the min size of compress value
 ```
-
-todo:
-* 1) compress value feature
 
