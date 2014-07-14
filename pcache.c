@@ -29,7 +29,7 @@
 #include "ncx_slab.h"
 #include "ncx_shm.h"
 #include "ncx_lock.h"
-#include "lzf.h"
+#include "fastlz.h"
 
 
 #define PCACHE_KEY_MAX       256
@@ -396,7 +396,7 @@ PHP_FUNCTION(pcache_set)
 
         out = emalloc(val_len + 1);
         if (out) {
-            complen = lzf_compress(val, val_len, out, val_len);
+            complen = fastlz_compress((void *)val, val_len, out);
             if (complen != 0 && complen < val_len) { // compress success
                 val = out;
                 val_len = complen;
@@ -511,8 +511,8 @@ PHP_FUNCTION(pcache_get)
 
         if (retval) {
             if (item->compress) {
-                lzf_decompress(item->data + item->key_size,
-                    item->val_size, retval, retlen);
+                fastlz_decompress((void *)(item->data + item->key_size),
+                    item->val_size, (void *)retval, retlen);
             } else {
                 memcpy(retval, item->data + item->key_size,
                     retlen);
