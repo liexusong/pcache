@@ -29,7 +29,7 @@
 #include "ncx_slab.h"
 #include "ncx_shm.h"
 #include "ncx_lock.h"
-#include <zlib.h>
+#include "fastlz.h"
 
 
 #define PCACHE_KEY_MAX       256
@@ -370,8 +370,7 @@ PHP_FUNCTION(pcache_set)
     int index;
     int nsize;
     char out_data[PCACHE_VAL_MAX * 2];
-    int out_len = PCACHE_VAL_MAX * 2;
-    int retcomp, compress = 0;
+    int complen = 0, compress = 0;
 
     if (!cache_enable) {
         RETURN_FALSE;
@@ -394,11 +393,10 @@ PHP_FUNCTION(pcache_set)
     // try to compress the value
 
     if (compress_enable && val_len >= compress_min) {
-
-        retcomp = compress(out_data, &out_len, val, val_len);
-        if (retcomp == Z_OK && out_len < val_len) { // compress success
+        complen = fastlz_compress((void *)val, val_len, (void *)out_data);
+        if (complen != 0 && complen < val_len) { // compress success
             val = out_data;
-            val_len = out_len;
+            val_len = complen;
             compress = 1;
         }
     }
@@ -505,8 +503,8 @@ PHP_FUNCTION(pcache_get)
 
         if (retval) {
             if (item->compress) {
-                uncompress(retval, &retlen,
-                    item->data + item->key_size, item->vsize);
+                fastlz_decompress((void *)(item->data + item->key_size),
+                    item->val_size, (void *)retval, retlen);
             } else {
                 memcpy(retval, item->data + item->key_size,
                     retlen);
