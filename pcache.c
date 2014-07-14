@@ -394,7 +394,7 @@ PHP_FUNCTION(pcache_set)
 
     if (compress_enable && val_len >= compress_min) {
 
-        out = emalloc(val_len + 1);
+        out = emalloc(val_len * 2);
         if (out) {
             complen = fastlz_compress((void *)val, val_len, out);
             if (complen != 0 && complen < val_len) { // compress success
