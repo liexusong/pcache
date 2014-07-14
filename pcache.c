@@ -369,7 +369,7 @@ PHP_FUNCTION(pcache_set)
     pcache_item_t *item, *prev, *next, *temp;
     int index;
     int nsize;
-    void *out = NULL;
+    char out_data[PCACHE_VAL_MAX * 2];
     int complen = 0, compress = 0;
 
     if (!cache_enable) {
@@ -393,15 +393,11 @@ PHP_FUNCTION(pcache_set)
     // try to compress the value
 
     if (compress_enable && val_len >= compress_min) {
-
-        out = emalloc(val_len * 2);
-        if (out) {
-            complen = fastlz_compress((void *)val, val_len, out);
-            if (complen != 0 && complen < val_len) { // compress success
-                val = out;
-                val_len = complen;
-                compress = 1;
-            }
+        complen = fastlz_compress((void *)val, val_len, (void *)out_data);
+        if (complen != 0 && complen < val_len) { // compress success
+            val = out_data;
+            val_len = complen;
+            compress = 1;
         }
     }
 
@@ -463,10 +459,6 @@ PHP_FUNCTION(pcache_set)
     }
 
     ncx_shmtx_unlock(cache_lock);
-
-    if (NULL != out) {
-        efree(out);
-    }
 
     RETURN_TRUE;
 }
