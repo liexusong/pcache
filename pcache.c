@@ -30,6 +30,7 @@
 #include "ncx_shm.h"
 #include "ncx_lock.h"
 #include "fastlz.h"
+#include "pcache.h"
 
 #include <time.h>
 

@@ -26,8 +26,6 @@
 
 #include "php.h"
 #include "php_ini.h"
-#include "php_variables.h"
-#include "SAPI.h"
 #include "pcache.h"
 
 
@@ -78,7 +76,7 @@ PS_WRITE_FUNC(redis)
     int maxlifetime = INI_INT("session.gc_maxlifetime");
 
     result = pcache_setval(key, strlen(key),
-                           val, vallen, maxlifetime);
+                           val, vallen, (long)maxlifetime);
     if (result == 0) {
         return SUCCESS;
     }
