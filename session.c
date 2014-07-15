@@ -37,7 +37,7 @@ ps_module ps_mod_pcache = {
 extern int pcache_open;
 
 
-PS_OPEN_FUNC(redis)
+PS_OPEN_FUNC(pcache)
 {
     if (pcache_open) {
         return SUCCESS;
@@ -46,13 +46,13 @@ PS_OPEN_FUNC(redis)
 }
 
 
-PS_CLOSE_FUNC(redis)
+PS_CLOSE_FUNC(pcache)
 {
 	return SUCCESS;
 }
 
 
-PS_READ_FUNC(redis)
+PS_READ_FUNC(pcache)
 {
     char *retval;
     int   retlen;
@@ -70,7 +70,7 @@ PS_READ_FUNC(redis)
 }
 
 
-PS_WRITE_FUNC(redis)
+PS_WRITE_FUNC(pcache)
 {
     int result;
     int maxlifetime = INI_INT("session.gc_maxlifetime");
@@ -85,7 +85,7 @@ PS_WRITE_FUNC(redis)
 }
 
 
-PS_DESTROY_FUNC(redis)
+PS_DESTROY_FUNC(pcache)
 {
     int result;
 
@@ -98,7 +98,7 @@ PS_DESTROY_FUNC(redis)
 }
 
 
-PS_GC_FUNC(redis)
+PS_GC_FUNC(pcache)
 {
     return SUCCESS;
 }
