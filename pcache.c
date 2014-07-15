@@ -65,6 +65,7 @@ static int compress_enable = 1;
 static int compress_min = PCACHE_MIN_COMPRESS;
 
 int pcache_ncpu;
+int pcache_open;
 
 /* {{{ pcache_functions[]
  *
@@ -257,6 +258,7 @@ PHP_MINIT_FUNCTION(pcache)
     REGISTER_INI_ENTRIES();
 
     if (!cache_enable) {
+        pcache_open = 0;
         return SUCCESS;
     }
 
@@ -297,6 +299,8 @@ PHP_MINIT_FUNCTION(pcache)
     if (pcache_ncpu <= 0) {
         pcache_ncpu = 1;
     }
+
+    pcache_open = 1;
 
     return SUCCESS;
 }
