@@ -31,6 +31,8 @@
 #include "ncx_lock.h"
 #include "fastlz.h"
 
+#include <time.h>
+
 
 #define PCACHE_KEY_MAX       256
 #define PCACHE_VAL_MAX       65535
@@ -42,7 +44,7 @@ typedef struct pcache_item  pcache_item_t;
 
 struct pcache_item {
     pcache_item_t  *next;
-    u_char          compress;
+    long            expire;
     u_char          key_size;
     u_short         val_size;
     u_short         org_size;
@@ -233,15 +235,15 @@ ZEND_INI_MH(pcache_set_compress_min)
 
 
 PHP_INI_BEGIN()
-    PHP_INI_ENTRY("pcache.cache_size", "1048576", PHP_INI_ALL,
+    PHP_INI_ENTRY("pcache.cache_size", "1048576", PHP_INI_SYSTEM,
           pcache_set_cache_size)
-    PHP_INI_ENTRY("pcache.buckets_size", "1000", PHP_INI_ALL,
+    PHP_INI_ENTRY("pcache.buckets_size", "1000", PHP_INI_SYSTEM,
           pcache_set_buckets_size)
-    PHP_INI_ENTRY("pcache.enable", "1", PHP_INI_ALL,
+    PHP_INI_ENTRY("pcache.enable", "1", PHP_INI_SYSTEM,
           pcache_set_enable)
-    PHP_INI_ENTRY("pcache.compress_enable", "1", PHP_INI_ALL,
+    PHP_INI_ENTRY("pcache.compress_enable", "1", PHP_INI_SYSTEM,
           pcache_set_compress_enable)
-    PHP_INI_ENTRY("pcache.compress_min", "16", PHP_INI_ALL,
+    PHP_INI_ENTRY("pcache.compress_min", "16", PHP_INI_SYSTEM,
           pcache_set_compress_min)
 PHP_INI_END()
 
@@ -366,6 +368,7 @@ PHP_FUNCTION(pcache_set)
 {
     char *key = NULL, *val = NULL;
     int key_len, val_len, org_len;
+    long expire = 0;
     pcache_item_t *item, *prev, *next, *temp;
     int index;
     int nsize;
@@ -376,8 +379,8 @@ PHP_FUNCTION(pcache_set)
         RETURN_FALSE;
     }
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ss",
-          &key, &key_len, &val, &val_len) == FAILURE)
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ssl|",
+          &key, &key_len, &val, &val_len, &expire) == FAILURE)
     {
         RETURN_FALSE;
     }
@@ -386,6 +389,10 @@ PHP_FUNCTION(pcache_set)
 
     if (key_len > PCACHE_KEY_MAX || val_len > PCACHE_VAL_MAX) {
         RETURN_FALSE;
+    }
+
+    if (expire > 0) {
+        expire += (long)time(NULL);
     }
 
     org_len = val_len; // save the original size
@@ -397,7 +404,6 @@ PHP_FUNCTION(pcache_set)
         if (complen != 0 && complen < val_len) { // compress success
             val = out_data;
             val_len = complen;
-            compress = 1;
         }
     }
 
@@ -411,7 +417,7 @@ PHP_FUNCTION(pcache_set)
     // init item fields
 
     item->next = NULL;
-    item->compress = compress;
+    item->expire = expire;
     item->key_size = key_len;
     item->val_size = val_len;
     item->org_size = org_len;
@@ -468,7 +474,7 @@ PHP_FUNCTION(pcache_get)
 {
     char *key = NULL;
     int key_len;
-    pcache_item_t *item;
+    pcache_item_t *item, *prev;
     int index;
     int retlen = 0;
     char *retval = NULL;
@@ -487,30 +493,46 @@ PHP_FUNCTION(pcache_get)
 
     ncx_shmtx_lock(cache_lock);
 
+    prev = NULL;
     item = cache_buckets[index];
 
     while (item) {
-        if (item->key_size == key_len && !memcmp(item->data, key, key_len)) {
+        if (item->key_size == key_len &&
+            !memcmp(item->data, key, key_len))
+        {
             break;
         }
+
+        prev = item;
         item = item->next;
     }
 
-    if (item) { // copy the value to userspace
-
-        retlen = item->org_size;
-        retval = emalloc(retlen + 1);
-
-        if (retval) {
-            if (item->compress) {
-                fastlz_decompress((void *)(item->data + item->key_size),
-                    item->val_size, (void *)retval, retlen);
+    if (item) {
+        // item was expire
+        if (item->expire > 0 && item->expire <= (long)time(NULL)) {
+            if (prev) {
+                prev->next = item->next;
             } else {
-                memcpy(retval, item->data + item->key_size,
-                    retlen);
+                cache_buckets[index] = item->next;
             }
 
-            retval[retlen] = '\0';
+            ncx_slab_free(cache_pool, item);
+
+        } else { // copy value to user space
+            retlen = item->org_size;
+            retval = emalloc(retlen + 1);
+    
+            if (retval) {
+                if (item->val_len < item->org_len) {
+                    fastlz_decompress((void *)(item->data + item->key_size),
+                        item->val_size, (void *)retval, retlen);
+
+                } else {
+                    memcpy(retval, item->data + item->key_size, retlen);
+                }
+    
+                retval[retlen] = '\0';
+            }
         }
     }
 
@@ -550,8 +572,9 @@ PHP_FUNCTION(pcache_del)
     next = cache_buckets[index];
 
     while (next) {
-        if (key_len == next->key_size && !memcmp(key, next->data, key_len)) {
-
+        if (key_len == next->key_size &&
+            !memcmp(key, next->data, key_len))
+        {
             if (prev) {
                 prev->next = next->next;
             } else {
