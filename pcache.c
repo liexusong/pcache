@@ -369,11 +369,12 @@ PHP_FUNCTION(pcache_set)
     char *key = NULL, *val = NULL;
     int key_len, val_len, org_len;
     long expire = 0;
-    pcache_item_t *item, *prev, *next, *temp;
+    pcache_item_t *item, *prev,
+                  *next, *temp;
     int index;
     int nsize;
     char out_data[PCACHE_VAL_MAX * 2];
-    int complen = 0, compress = 0;
+    int comp_len = 0, compress = 0;
 
     if (!cache_enable) {
         RETURN_FALSE;
@@ -392,7 +393,7 @@ PHP_FUNCTION(pcache_set)
     }
 
     if (expire > 0) {
-        expire += (long)time(NULL);
+        expire += (long)time(NULL); // update expire time
     }
 
     org_len = val_len; // save the original size
@@ -400,15 +401,16 @@ PHP_FUNCTION(pcache_set)
     // try to compress the value
 
     if (compress_enable && val_len >= compress_min) {
-        complen = fastlz_compress((void *)val, val_len, (void *)out_data);
-        if (complen != 0 && complen < val_len) { // compress success
+        comp_len = fastlz_compress((void *)val, val_len, (void *)out_data);
+        // after compress and the value small then original
+        if (comp_len != 0 && comp_len < val_len) {
             val = out_data;
-            val_len = complen;
+            val_len = comp_len;
         }
     }
 
     nsize = sizeof(pcache_item_t) + key_len + val_len;
-    
+
     item = ncx_slab_alloc(cache_pool, nsize);
     if (!item) {
         RETURN_FALSE;
@@ -508,7 +510,7 @@ PHP_FUNCTION(pcache_get)
     }
 
     if (item) {
-        // item was expire
+        // item was expired
         if (item->expire > 0 && item->expire <= (long)time(NULL)) {
             if (prev) {
                 prev->next = item->next;
@@ -523,9 +525,9 @@ PHP_FUNCTION(pcache_get)
             retval = emalloc(retlen + 1);
     
             if (retval) {
-                if (item->val_size < item->org_size) {
+                if (item->val_size < item->org_size) { // decompress
                     fastlz_decompress((void *)(item->data + item->key_size),
-                        item->val_size, (void *)retval, retlen);
+                                    item->val_size, (void *)retval, retlen);
 
                 } else {
                     memcpy(retval, item->data + item->key_size, retlen);
