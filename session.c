@@ -24,10 +24,13 @@
 #include "ext/standard/info.h"
 #include <zend_exceptions.h>
 
-#include "php.h"
-#include "php_ini.h"
 #include "pcache.h"
 #include "pcache_session.h"
+
+#include "php.h"
+#include "php_ini.h"
+#include "php_variables.h"
+#include "SAPI.h"
 
 
 ps_module ps_mod_pcache = {
