@@ -377,7 +377,6 @@ int pcache_setval(char *key, int key_len,
     char *val, int val_len, long expire)
 {
     int org_len;
-    long expire = 0;
     pcache_item_t *item, *prev, *next, *temp;
     int index;
     int nsize;
