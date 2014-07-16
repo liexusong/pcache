@@ -538,15 +538,15 @@ int pcache_getval(char *key, int key_len,
             memptr = emalloc(retlen + 1);
 
             if (memptr) {
-                if (item->val_len < item->org_len) {
+                if (item->val_size < item->org_size) {
                     fastlz_decompress((void *)(item->data + item->key_size),
                                         item->val_size, (void *)memptr, length);
 
                 } else {
-                    memcpy(memptr, item->data + item->key_size, retlen);
+                    memcpy(memptr, item->data + item->key_size, length);
                 }
     
-                memptr[retlen] = '\0';
+                memptr[length] = '\0';
 
                 *retval = memptr;
                 *retlen = length;
@@ -578,7 +578,7 @@ PHP_FUNCTION(pcache_get)
         RETURN_FALSE;
     }
 
-    result = pcache_getval(key, key_len, &retval, &retlen)
+    result = pcache_getval(key, key_len, &retval, &retlen);
 
     if (result == -1) {
         RETURN_FALSE;
