@@ -685,6 +685,10 @@ PS_READ_FUNC(pcache)
     int   retlen;
     int   result;
 
+    if (!pcache_open) {
+        return FAILURE;
+    }
+
     result = pcache_getval(key, strlen(key), 
                            &retval, &retlen);
     if (result == 0) {
@@ -702,6 +706,10 @@ PS_WRITE_FUNC(pcache)
     int result;
     int maxlifetime = INI_INT("session.gc_maxlifetime");
 
+    if (!pcache_open) {
+        return FAILURE;
+    }
+
     result = pcache_setval(key, strlen(key),
                            val, vallen, (long)maxlifetime);
     if (result == 0) {
@@ -715,6 +723,10 @@ PS_WRITE_FUNC(pcache)
 PS_DESTROY_FUNC(pcache)
 {
     int result;
+
+    if (!pcache_open) {
+        return FAILURE;
+    }
 
     result = pcache_delval(key, strlen(key));
     if (result == 0) {

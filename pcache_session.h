@@ -8,5 +8,4 @@ PS_WRITE_FUNC(pcache);
 PS_DESTROY_FUNC(pcache);
 PS_GC_FUNC(pcache);
 
-
 #endif
