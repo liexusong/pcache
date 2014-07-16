@@ -22,6 +22,7 @@
 #endif
 
 #include "ext/standard/info.h"
+#include "ext/session/php_session.h"
 #include <zend_exceptions.h>
 
 #include "php.h"
