@@ -523,7 +523,7 @@ PHP_FUNCTION(pcache_get)
             retval = emalloc(retlen + 1);
     
             if (retval) {
-                if (item->val_len < item->org_len) {
+                if (item->val_size < item->org_size) {
                     fastlz_decompress((void *)(item->data + item->key_size),
                         item->val_size, (void *)retval, retlen);
 
