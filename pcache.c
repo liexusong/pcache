@@ -160,7 +160,7 @@ ZEND_INI_MH(pcache_set_cache_size)
         return FAILURE;
     }
 
-    pcache_atoi(new_value, &cache_size, &len);
+    pcache_atoi((const char *)new_value, &cache_size, &len);
 
     if (len > 0 && len < new_value_length) { /* have unit */
         switch (new_value[len]) {
