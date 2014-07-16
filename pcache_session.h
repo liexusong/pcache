@@ -1,8 +1,6 @@
 #ifndef __PCACHE_SESSION_H
 #define __PCACHE_SESSION_H
 
-#include "ext/session/php_session.h"
-
 PS_OPEN_FUNC(pcache);
 PS_CLOSE_FUNC(pcache);
 PS_READ_FUNC(pcache);

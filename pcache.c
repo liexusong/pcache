@@ -32,6 +32,7 @@
 #include "ncx_lock.h"
 #include "fastlz.h"
 #include "pcache.h"
+#include "pcache_session.h"
 
 #include <time.h>
 
@@ -70,7 +71,9 @@ int pcache_ncpu;
 int pcache_open;
 
 
-extern ps_module ps_mod_pcache;
+ps_module ps_mod_pcache = {
+    PS_MOD(pcache)
+};
 
 /* {{{ pcache_functions[]
  *
@@ -658,6 +661,74 @@ PHP_FUNCTION(pcache_del)
 }
 
 /* }}} */
+
+
+
+PS_OPEN_FUNC(pcache)
+{
+    if (pcache_open) {
+        return SUCCESS;
+    }
+    return FAILURE;
+}
+
+
+PS_CLOSE_FUNC(pcache)
+{
+	return SUCCESS;
+}
+
+
+PS_READ_FUNC(pcache)
+{
+    char *retval;
+    int   retlen;
+    int   result;
+
+    result = pcache_getval(key, strlen(key), 
+                           &retval, &retlen);
+    if (result == 0) {
+        *val = retval;
+        *vallen = retlen;
+        return SUCCESS;
+    }
+
+    return FAILURE;
+}
+
+
+PS_WRITE_FUNC(pcache)
+{
+    int result;
+    int maxlifetime = INI_INT("session.gc_maxlifetime");
+
+    result = pcache_setval(key, strlen(key),
+                           val, vallen, (long)maxlifetime);
+    if (result == 0) {
+        return SUCCESS;
+    }
+
+    return FAILURE;
+}
+
+
+PS_DESTROY_FUNC(pcache)
+{
+    int result;
+
+    result = pcache_delval(key, strlen(key));
+    if (result == 0) {
+        return SUCCESS;
+    }
+
+    return FAILURE;
+}
+
+
+PS_GC_FUNC(pcache)
+{
+    return SUCCESS;
+}
 
 
 /*
