@@ -477,7 +477,7 @@ PHP_FUNCTION(pcache_set)
         RETURN_FALSE;
     }
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ssl|",
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ss|l",
           &key, &key_len, &val, &val_len, &expire) == FAILURE)
     {
         RETURN_FALSE;
