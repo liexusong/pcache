@@ -14,11 +14,17 @@ Extension for PHP local cache
 * 2) compress value feature
 
 
+functions list:
+---------------
+* 1) pcache_set($key, $value, $expire = 0);
+* 2) pcache_get($key);
+* 3) pcache_del($key);
+
 Example:
 ```php
 <?php
 
-pcache_set("myname", "liexusong");
+pcache_set("myname", "liexusong", 60); // 1 min expire
 
 var_dump(pcache_get("myname"));
 
