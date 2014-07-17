@@ -45,7 +45,6 @@ PHP_MINFO_FUNCTION(pcache);
 PHP_FUNCTION(pcache_set);
 PHP_FUNCTION(pcache_get);
 PHP_FUNCTION(pcache_del);
-PHP_FUNCTION(pcache_gc);
 
 /* 
   	Declare any global variables you may need between the BEGIN

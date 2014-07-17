@@ -31,7 +31,6 @@
 #include "ncx_lock.h"
 #include "fastlz.h"
 
-#include <stdlib.h>
 #include <time.h>
 
 
@@ -75,7 +74,6 @@ const zend_function_entry pcache_functions[] = {
     PHP_FE(pcache_set,    NULL)
     PHP_FE(pcache_get,    NULL)
     PHP_FE(pcache_del,    NULL)
-    PHP_FE(pcache_gc,     NULL)
     {NULL, NULL, NULL}    /* Must be the last line in pcache_functions[] */
 };
 /* }}} */
@@ -299,8 +297,6 @@ PHP_MINIT_FUNCTION(pcache)
     if (pcache_ncpu <= 0) {
         pcache_ncpu = 1;
     }
-
-    srand((unsigned)time(NULL));
 
     return SUCCESS;
 }
@@ -605,49 +601,6 @@ PHP_FUNCTION(pcache_del)
     } else {
         RETURN_FALSE;
     }
-}
-
-
-PHP_FUNCTION(pcache_gc)
-{
-    pcache_item_t *prev, *next, *temp;
-    int index;
-    long now;
-
-    if (!cache_enable) {
-        RETURN_FALSE;
-    }
-
-    index = (int) (rand() * buckets_size) % buckets_size;
-    now = (long) time(NULL);
-
-    ncx_shmtx_lock(cache_lock);
-
-    prev = NULL;
-    next = cache_buckets[index];
-
-    while (next) {
-        if (next->expire > 0 && next->expire <= now) { // expire
-            temp = next; // save current item
-
-            if (prev) {
-                prev->next = next->next;
-            } else {
-                cache_buckets[index] = next->next;
-            }
-
-            next = next->next;
-
-            ncx_slab_free(cache_pool, temp);
-
-            continue;
-        }
-
-        prev = next;
-        next = next->next;
-    }
-
-    ncx_shmtx_unlock(cache_lock);
 }
 
 /* }}} */
