@@ -618,7 +618,7 @@ PHP_FUNCTION(pcache_gc)
         RETURN_FALSE;
     }
 
-    index = (int) (rand() * buckets_size);
+    index = (int) (rand() * buckets_size) % buckets_size;
     now = (long) time(NULL);
 
     ncx_shmtx_lock(cache_lock);
