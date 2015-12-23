@@ -31,6 +31,8 @@
 #include "ncx_lock.h"
 #include "fastlz.h"
 
+#include <sys/types.h>
+#include <unistd.h>
 #include <time.h>
 
 
@@ -38,6 +40,20 @@
 #define PCACHE_VAL_MAX       65535
 #define PCACHE_BUCKETS_SIZE  1000
 #define PCACHE_MIN_COMPRESS  16
+
+#if PHP_VERSION_ID >= 70000
+
+#define NEW_VALUE_LEN ZSTR_LEN(new_value)
+#define NEW_VALUE ZSTR_VAL(new_value)
+#define _RETURN_STRINGL(k,l) RETURN_STRINGL(k,l)
+
+#else
+
+#define NEW_VALUE_LEN new_value_length
+#define NEW_VALUE new_value
+#define _RETURN_STRINGL(k,l) RETURN_STRINGL(k,l,0)
+
+#endif
 
 
 typedef struct pcache_item  pcache_item_t;
@@ -138,11 +154,11 @@ void pcache_atoi(const char *str, int *ret, int *len)
 
 ZEND_INI_MH(pcache_set_enable)
 {
-    if (new_value_length == 0) {
+    if (NEW_VALUE_LEN == 0) {
         return FAILURE;
     }
 
-    if (!strcasecmp(new_value, "on") || !strcmp(new_value, "1")) {
+    if (!strcasecmp(NEW_VALUE, "on") || !strcmp(NEW_VALUE, "1")) {
         cache_enable = 1;
     } else {
         cache_enable = 0;
@@ -156,28 +172,28 @@ ZEND_INI_MH(pcache_set_cache_size)
 {
     int len;
 
-    if (new_value_length == 0) { 
+    if (NEW_VALUE_LEN == 0) { 
         return FAILURE;
     }
 
-    pcache_atoi((const char *)new_value, (int *)&cache_size, &len);
+    pcache_atoi((const char *)NEW_VALUE, (int *)&cache_size, &len);
 
-    if (len > 0 && len < new_value_length) { /* have unit */
-        switch (new_value[len]) {
-        case 'k':
-        case 'K':
-            cache_size *= 1024;
-            break;
-        case 'm':
-        case 'M':
-            cache_size *= 1024 * 1024;
-            break;
-        case 'g':
-        case 'G':
-            cache_size *= 1024 * 1024 * 1024;
-            break;
-        default:
-            return FAILURE;
+    if (len > 0 && len < NEW_VALUE_LEN) { /* have unit */
+        switch (NEW_VALUE[len]) {
+            case 'k':
+            case 'K':
+                cache_size *= 1024;
+                break;
+            case 'm':
+            case 'M':
+                cache_size *= 1024 * 1024;
+                break;
+            case 'g':
+            case 'G':
+                cache_size *= 1024 * 1024 * 1024;
+                break;
+            default:
+                return FAILURE;
         }
 
     } else if (len == 0) { /*failed */
@@ -190,11 +206,11 @@ ZEND_INI_MH(pcache_set_cache_size)
 
 ZEND_INI_MH(pcache_set_buckets_size)
 {
-    if (new_value_length == 0) {
+    if (NEW_VALUE_LEN == 0) {
         return FAILURE;
     }
 
-    buckets_size = atoi(new_value);
+    buckets_size = atoi(NEW_VALUE);
     if (buckets_size < PCACHE_BUCKETS_SIZE) {
         buckets_size = PCACHE_BUCKETS_SIZE;
     }
@@ -205,11 +221,11 @@ ZEND_INI_MH(pcache_set_buckets_size)
 
 ZEND_INI_MH(pcache_set_compress_enable)
 {
-    if (new_value_length == 0) {
+    if (NEW_VALUE_LEN == 0) {
         return FAILURE;
     }
 
-    if (!strcasecmp(new_value, "on") || !strcmp(new_value, "1")) {
+    if (!strcasecmp(NEW_VALUE, "on") || !strcmp(NEW_VALUE, "1")) {
         compress_enable = 1;
     } else {
         compress_enable = 0;
@@ -221,11 +237,11 @@ ZEND_INI_MH(pcache_set_compress_enable)
 
 ZEND_INI_MH(pcache_set_compress_min)
 {
-    if (new_value_length == 0) {
+    if (NEW_VALUE_LEN == 0) {
         return FAILURE;
     }
 
-    compress_min = atoi(new_value);
+    compress_min = atoi(NEW_VALUE);
     if (compress_min < PCACHE_MIN_COMPRESS) {
         compress_min = PCACHE_MIN_COMPRESS;
     }
@@ -261,7 +277,7 @@ PHP_MINIT_FUNCTION(pcache)
     }
 
     cache_shm.size = cache_size;
-    
+
     if (ncx_shm_alloc(&cache_shm) == -1) { // alloc share memory
         return FAILURE;
     }
@@ -380,11 +396,28 @@ PHP_FUNCTION(pcache_set)
         RETURN_FALSE;
     }
 
+#if PHP_VERSION_ID >= 70000
+
+    zend_string *pkey, *pval;
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "SS|l",
+          &pkey, &pval, &expire) == FAILURE)
+    {
+        RETURN_FALSE;
+    }
+    key = ZSTR_VAL(pkey);
+    key_len = ZSTR_LEN(pkey);
+    val = ZSTR_VAL(pval);
+    val_len = ZSTR_LEN(pval);
+
+#else
+
     if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ss|l",
           &key, &key_len, &val, &val_len, &expire) == FAILURE)
     {
         RETURN_FALSE;
     }
+
+#endif
 
     // key length and value length are valid?
 
@@ -428,7 +461,6 @@ PHP_FUNCTION(pcache_set)
     memcpy(item->data + key_len, val, val_len);
 
     index = pcache_hash(key, key_len) % buckets_size; // bucket index
-
     // insert into hashtable
 
     ncx_shmtx_lock(cache_lock);
@@ -485,16 +517,29 @@ PHP_FUNCTION(pcache_get)
         RETURN_FALSE;
     }
 
+#if PHP_VERSION_ID >= 70000
+
+    zend_string *pkey, *pval;
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S",
+          &pkey) == FAILURE)
+    {
+        RETURN_FALSE;
+    }
+    key = ZSTR_VAL(pkey);
+    key_len = ZSTR_LEN(pkey);
+
+#else
+
     if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s",
           &key, &key_len) == FAILURE)
     {
         RETURN_FALSE;
     }
 
+#endif
+
     index = pcache_hash(key, key_len) % buckets_size; // bucket index
-
     ncx_shmtx_lock(cache_lock);
-
     prev = NULL;
     item = cache_buckets[index];
 
@@ -523,7 +568,7 @@ PHP_FUNCTION(pcache_get)
         } else { // copy value to user space
             retlen = item->org_size;
             retval = emalloc(retlen + 1);
-    
+
             if (retval) {
                 if (item->val_size < item->org_size) { // decompress
                     fastlz_decompress((void *)(item->data + item->key_size),
@@ -532,16 +577,15 @@ PHP_FUNCTION(pcache_get)
                 } else {
                     memcpy(retval, item->data + item->key_size, retlen);
                 }
-    
+
                 retval[retlen] = '\0';
             }
         }
     }
 
     ncx_shmtx_unlock(cache_lock);
-
     if (retval) {
-        RETURN_STRINGL(retval, retlen, 0);
+        _RETURN_STRINGL(retval, retlen);
     } else {
         RETURN_FALSE;
     }
@@ -560,11 +604,26 @@ PHP_FUNCTION(pcache_del)
         RETURN_FALSE;
     }
 
+#if PHP_VERSION_ID >= 70000
+
+    zend_string *pkey, *pval;
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S",
+          &pkey) == FAILURE)
+    {
+        RETURN_FALSE;
+    }
+    key = ZSTR_VAL(pkey);
+    key_len = ZSTR_LEN(pkey);
+
+#else
+
     if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s",
           &key, &key_len) == FAILURE)
     {
         RETURN_FALSE;
     }
+
+#endif
 
     index = pcache_hash(key, key_len) % buckets_size; // bucket index
 
