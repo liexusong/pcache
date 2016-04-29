@@ -344,7 +344,7 @@ static long pcache_hash(char *key, int len)
 PHP_FUNCTION(pcache_set)
 {
     char *key = NULL, *val = NULL;
-    int key_len, val_len, org_len;
+    int key_len, val_len;
     long expire = 0;
     pcache_cache_t *item, *prev,
                    *next, *temp;
@@ -514,7 +514,7 @@ PHP_FUNCTION(pcache_get)
             ncx_slab_free(cache_pool, item);
 
         } else { /* copy value to user space */
-            retlen = item->org_size;
+            retlen = item->val_size;
             retval = emalloc(retlen + 1);
 
             if (retval) {

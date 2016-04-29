@@ -1,4 +1,3 @@
-
 #include "ncx_slab.h"
 #include <unistd.h>
 
@@ -48,8 +47,8 @@
 
 static ncx_slab_page_t *ncx_slab_alloc_pages(ncx_slab_pool_t *pool,
     ncx_uint_t pages);
-static void ncx_slab_free_pages(ncx_slab_pool_t *pool, ncx_slab_page_t *page,
-    ncx_uint_t pages);
+static void ncx_slab_free_pages(ncx_slab_pool_t *pool,
+    ncx_slab_page_t *page, ncx_uint_t pages);
 
 
 static ncx_uint_t  ncx_slab_max_size;
@@ -627,8 +626,8 @@ ncx_slab_alloc_pages(ncx_slab_pool_t *pool, ncx_uint_t pages)
 
 
 static void
-ncx_slab_free_pages(ncx_slab_pool_t *pool, ncx_slab_page_t *page,
-    ncx_uint_t pages)
+ncx_slab_free_pages(ncx_slab_pool_t *pool,
+    ncx_slab_page_t *page, ncx_uint_t pages)
 {
     ncx_slab_page_t  *prev;
 
