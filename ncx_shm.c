@@ -12,7 +12,8 @@ ncx_shm_alloc(ncx_shm_t *shm)
 {
     shm->addr = (void *) mmap(NULL, shm->size,
                               PROT_READ | PROT_WRITE,
-                              MAP_ANON | MAP_SHARED, -1, 0);
+                              MAP_ANON | MAP_SHARED,
+                              -1, 0);
 
     if (shm->addr == NULL) {
         return -1;
@@ -42,7 +43,7 @@ ncx_shm_alloc(ncx_shm_t *shm)
         return -1;
     }
 
-    shm->addr = (void *) mmap(NULL, shm->size, 
+    shm->addr = (void *) mmap(NULL, shm->size,
                               PROT_READ | PROT_WRITE,
                               MAP_SHARED, fd, 0);
 

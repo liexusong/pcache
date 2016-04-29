@@ -29,7 +29,6 @@
 #include "ncx_slab.h"
 #include "ncx_shm.h"
 #include "ncx_lock.h"
-#include "fastlz.h"
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -39,7 +38,6 @@
 #define PCACHE_KEY_MAX       256
 #define PCACHE_VAL_MAX       65535
 #define PCACHE_BUCKETS_SIZE  1000
-#define PCACHE_MIN_COMPRESS  16
 
 #if PHP_VERSION_ID >= 70000
 
@@ -56,29 +54,26 @@
 #endif
 
 
-typedef struct pcache_item  pcache_item_t;
+typedef struct pcache_cache  pcache_cache_t;
 
-struct pcache_item {
-    pcache_item_t  *next;
-    long            expire;
-    u_char          key_size;
-    u_short         val_size;
-    u_short         org_size;
-    char            data[0];
+struct pcache_cache {
+    struct pcache_cache *next;
+    long                 expire;
+    u_char               key_size;
+    u_short              val_size;
+    char                 data[0];
 };
 
 /* True global resources - no need for thread safety here */
 static ncx_shm_t cache_shm;
 static ncx_slab_pool_t *cache_pool;
-static pcache_item_t **cache_buckets;
+static pcache_cache_t **cache_buckets;
 static ncx_atomic_t *cache_lock;
 
-// configure entries
+/* configure entries */
 static ncx_uint_t cache_size = 1048576; /* 1MB */
 static ncx_uint_t buckets_size = PCACHE_BUCKETS_SIZE;
 static int cache_enable = 1;
-static int compress_enable = 1;
-static int compress_min = PCACHE_MIN_COMPRESS;
 
 int pcache_ncpu;
 
@@ -168,11 +163,11 @@ ZEND_INI_MH(pcache_set_enable)
 }
 
 
-ZEND_INI_MH(pcache_set_cache_size) 
+ZEND_INI_MH(pcache_set_cache_size)
 {
     int len;
 
-    if (NEW_VALUE_LEN == 0) { 
+    if (NEW_VALUE_LEN == 0) {
         return FAILURE;
     }
 
@@ -196,7 +191,7 @@ ZEND_INI_MH(pcache_set_cache_size)
                 return FAILURE;
         }
 
-    } else if (len == 0) { /*failed */
+    } else if (len == 0) {
         return FAILURE;
     }
 
@@ -219,37 +214,6 @@ ZEND_INI_MH(pcache_set_buckets_size)
 }
 
 
-ZEND_INI_MH(pcache_set_compress_enable)
-{
-    if (NEW_VALUE_LEN == 0) {
-        return FAILURE;
-    }
-
-    if (!strcasecmp(NEW_VALUE, "on") || !strcmp(NEW_VALUE, "1")) {
-        compress_enable = 1;
-    } else {
-        compress_enable = 0;
-    }
-
-    return SUCCESS;
-}
-
-
-ZEND_INI_MH(pcache_set_compress_min)
-{
-    if (NEW_VALUE_LEN == 0) {
-        return FAILURE;
-    }
-
-    compress_min = atoi(NEW_VALUE);
-    if (compress_min < PCACHE_MIN_COMPRESS) {
-        compress_min = PCACHE_MIN_COMPRESS;
-    }
-
-    return SUCCESS;
-}
-
-
 PHP_INI_BEGIN()
     PHP_INI_ENTRY("pcache.cache_size", "1048576", PHP_INI_SYSTEM,
           pcache_set_cache_size)
@@ -257,10 +221,6 @@ PHP_INI_BEGIN()
           pcache_set_buckets_size)
     PHP_INI_ENTRY("pcache.enable", "1", PHP_INI_SYSTEM,
           pcache_set_enable)
-    PHP_INI_ENTRY("pcache.compress_enable", "1", PHP_INI_SYSTEM,
-          pcache_set_compress_enable)
-    PHP_INI_ENTRY("pcache.compress_min", "16", PHP_INI_SYSTEM,
-          pcache_set_compress_min)
 PHP_INI_END()
 
 
@@ -278,7 +238,7 @@ PHP_MINIT_FUNCTION(pcache)
 
     cache_shm.size = cache_size;
 
-    if (ncx_shm_alloc(&cache_shm) == -1) { // alloc share memory
+    if (ncx_shm_alloc(&cache_shm) == -1) { /* alloc share memory */
         return FAILURE;
     }
 
@@ -290,8 +250,9 @@ PHP_MINIT_FUNCTION(pcache)
     cache_pool->min_shift = 3;
     cache_pool->end = space + cache_size;
 
-    ncx_slab_init(cache_pool); // init slab
+    ncx_slab_init(cache_pool); /* init slab */
 
+    /* alloc cache lock */
     cache_lock = ncx_slab_alloc_locked(cache_pool, sizeof(ncx_atomic_t));
     if (!cache_lock) {
         ncx_shm_free(&cache_shm);
@@ -301,13 +262,13 @@ PHP_MINIT_FUNCTION(pcache)
     ncx_memzero(cache_lock, sizeof(ncx_atomic_t)); /* init zero */
 
     cache_buckets = ncx_slab_alloc_locked(cache_pool,
-                       sizeof(pcache_item_t *) * buckets_size);
+                       sizeof(pcache_cache_t *) * buckets_size);
     if (!cache_buckets) {
         ncx_shm_free(&cache_shm);
         return FAILURE;
     }
 
-    ncx_memzero(cache_buckets, sizeof(pcache_item_t *) * buckets_size);
+    ncx_memzero(cache_buckets, sizeof(pcache_cache_t *) * buckets_size);
 
     pcache_ncpu = sysconf(_SC_NPROCESSORS_ONLN); /* get cpus */
     if (pcache_ncpu <= 0) {
@@ -385,12 +346,10 @@ PHP_FUNCTION(pcache_set)
     char *key = NULL, *val = NULL;
     int key_len, val_len, org_len;
     long expire = 0;
-    pcache_item_t *item, *prev,
-                  *next, *temp;
+    pcache_cache_t *item, *prev,
+                   *next, *temp;
     int index;
     int nsize;
-    char out_data[PCACHE_VAL_MAX * 2];
-    int comp_len = 0, compress = 0;
 
     if (!cache_enable) {
         RETURN_FALSE;
@@ -404,8 +363,10 @@ PHP_FUNCTION(pcache_set)
     {
         RETURN_FALSE;
     }
+
     key = ZSTR_VAL(pkey);
     key_len = ZSTR_LEN(pkey);
+
     val = ZSTR_VAL(pval);
     val_len = ZSTR_LEN(pval);
 
@@ -419,49 +380,34 @@ PHP_FUNCTION(pcache_set)
 
 #endif
 
-    // key length and value length are valid?
+    /* key length and value length are valid? */
 
     if (key_len > PCACHE_KEY_MAX || val_len > PCACHE_VAL_MAX) {
         RETURN_FALSE;
     }
 
     if (expire > 0) {
-        expire += (long)time(NULL); // update expire time
+        expire += (long)time(NULL); /* update expire time */
     }
 
-    org_len = val_len; // save the original size
-
-    // try to compress the value
-
-    if (compress_enable && val_len >= compress_min) {
-        comp_len = fastlz_compress((void *)val, val_len, (void *)out_data);
-        // after compress and the value small then original
-        if (comp_len != 0 && comp_len < val_len) {
-            val = out_data;
-            val_len = comp_len;
-        }
-    }
-
-    nsize = sizeof(pcache_item_t) + key_len + val_len;
+    nsize = sizeof(pcache_cache_t) + key_len + val_len;
 
     item = ncx_slab_alloc(cache_pool, nsize);
     if (!item) {
         RETURN_FALSE;
     }
 
-    // init item fields
+    /* init item fields */
 
     item->next = NULL;
     item->expire = expire;
     item->key_size = key_len;
     item->val_size = val_len;
-    item->org_size = org_len;
 
     memcpy(item->data, key, key_len);
     memcpy(item->data + key_len, val, val_len);
 
-    index = pcache_hash(key, key_len) % buckets_size; // bucket index
-    // insert into hashtable
+    index = pcache_hash(key, key_len) % buckets_size; /* bucket index */
 
     ncx_shmtx_lock(cache_lock);
 
@@ -469,13 +415,12 @@ PHP_FUNCTION(pcache_set)
     next = cache_buckets[index];
 
     while (next) {
-        // key exists
         if (item->key_size == next->key_size &&
             !memcmp(item->data, next->data, item->key_size))
         {
             temp = next;
 
-            // skip this
+            /* skip */
             if (prev) {
                 prev->next = next->next;
             } else {
@@ -483,6 +428,7 @@ PHP_FUNCTION(pcache_set)
             }
 
             next = next->next;
+
             ncx_slab_free(cache_pool, temp);
 
             continue;
@@ -508,7 +454,7 @@ PHP_FUNCTION(pcache_get)
 {
     char *key = NULL;
     int key_len;
-    pcache_item_t *item, *prev;
+    pcache_cache_t *item, *prev;
     int index;
     int retlen = 0;
     char *retval = NULL;
@@ -538,8 +484,10 @@ PHP_FUNCTION(pcache_get)
 
 #endif
 
-    index = pcache_hash(key, key_len) % buckets_size; // bucket index
+    index = pcache_hash(key, key_len) % buckets_size; /* bucket index */
+
     ncx_shmtx_lock(cache_lock);
+
     prev = NULL;
     item = cache_buckets[index];
 
@@ -555,7 +503,7 @@ PHP_FUNCTION(pcache_get)
     }
 
     if (item) {
-        // item was expired
+        /* cache was expired */
         if (item->expire > 0 && item->expire <= (long)time(NULL)) {
             if (prev) {
                 prev->next = item->next;
@@ -565,25 +513,19 @@ PHP_FUNCTION(pcache_get)
 
             ncx_slab_free(cache_pool, item);
 
-        } else { // copy value to user space
+        } else { /* copy value to user space */
             retlen = item->org_size;
             retval = emalloc(retlen + 1);
 
             if (retval) {
-                if (item->val_size < item->org_size) { // decompress
-                    fastlz_decompress((void *)(item->data + item->key_size),
-                                    item->val_size, (void *)retval, retlen);
-
-                } else {
-                    memcpy(retval, item->data + item->key_size, retlen);
-                }
-
-                retval[retlen] = '\0';
+                memcpy(retval, item->data + item->key_size, retlen);
+                retval[retlen] = 0;
             }
         }
     }
 
     ncx_shmtx_unlock(cache_lock);
+
     if (retval) {
         _RETURN_STRINGL(retval, retlen);
     } else {
@@ -596,7 +538,7 @@ PHP_FUNCTION(pcache_del)
 {
     char *key = NULL;
     int key_len;
-    pcache_item_t *prev, *next;
+    pcache_cache_t *prev, *next;
     int index;
     int found = 0;
 
@@ -625,7 +567,7 @@ PHP_FUNCTION(pcache_del)
 
 #endif
 
-    index = pcache_hash(key, key_len) % buckets_size; // bucket index
+    index = pcache_hash(key, key_len) % buckets_size;
 
     ncx_shmtx_lock(cache_lock);
 

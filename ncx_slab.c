@@ -69,7 +69,7 @@ ncx_slab_init(ncx_slab_pool_t *pool)
 
     /* pagesize */
     ncx_pagesize = getpagesize();
-    for (n = ncx_pagesize, ncx_pagesize_shift = 0; 
+    for (n = ncx_pagesize, ncx_pagesize_shift = 0;
             n >>= 1; ncx_pagesize_shift++) { /* void */ }
 
     /* STUB */
@@ -130,9 +130,7 @@ ncx_slab_alloc(ncx_slab_pool_t *pool, size_t size)
     void  *p;
 
     ncx_shmtx_lock(&pool->mutex);
-
     p = ncx_slab_alloc_locked(pool, size);
-
     ncx_shmtx_unlock(&pool->mutex);
 
     return p;
@@ -241,7 +239,7 @@ ncx_slab_alloc_locked(ncx_slab_pool_t *pool, size_t size)
                         }
 
                         page->slab |= m;
-  
+
                         if (page->slab == NCX_SLAB_BUSY) {
                             prev = (ncx_slab_page_t *)
                                             (page->prev & ~NCX_SLAB_PAGE_MASK);
@@ -270,7 +268,7 @@ ncx_slab_alloc_locked(ncx_slab_pool_t *pool, size_t size)
             n = 1 << n;
             n = ((uintptr_t) 1 << n) - 1;
             mask = n << NCX_SLAB_MAP_SHIFT;
- 
+
             do {
                 if ((page->slab & NCX_SLAB_MAP_MASK) != mask) {
 
@@ -381,9 +379,7 @@ void
 ncx_slab_free(ncx_slab_pool_t *pool, void *p)
 {
     ncx_shmtx_lock(&pool->mutex);
-
     ncx_slab_free_locked(pool, p);
-
     ncx_shmtx_unlock(&pool->mutex);
 }
 

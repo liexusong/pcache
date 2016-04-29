@@ -45,7 +45,7 @@ if test "$PHP_PCACHE" != "no"; then
 
   dnl # --with-pcache -> check for lib and symbol presence
   dnl LIBNAME=pcache # you may want to change this
-  dnl LIBSYMBOL=pcache # you most likely want to change this 
+  dnl LIBSYMBOL=pcache # you most likely want to change this
 
   dnl PHP_CHECK_LIBRARY($LIBNAME,$LIBSYMBOL,
   dnl [
@@ -59,5 +59,5 @@ if test "$PHP_PCACHE" != "no"; then
   dnl
   dnl PHP_SUBST(PCACHE_SHARED_LIBADD)
 
-  PHP_NEW_EXTENSION(pcache, pcache.c ncx_lock.c ncx_shm.c ncx_slab.c fastlz.c, $ext_shared)
+  PHP_NEW_EXTENSION(pcache, pcache.c ncx_lock.c ncx_shm.c ncx_slab.c, $ext_shared)
 fi
