@@ -111,8 +111,8 @@ ncx_slab_init(ncx_slab_pool_t *pool)
     pool->pages->next = &pool->free;
     pool->pages->prev = (uintptr_t) &pool->free;
 
-    pool->start = (u_char *)
-                  ncx_align_ptr((uintptr_t) p + pages * sizeof(ncx_slab_page_t),
+    pool->start =
+        (u_char *)ncx_align_ptr((uintptr_t) p + pages * sizeof(ncx_slab_page_t),
                                  ncx_pagesize);
 
     m = pages - (pool->end - pool->start) / ncx_pagesize;
